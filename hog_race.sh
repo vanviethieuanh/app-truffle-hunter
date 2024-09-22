@@ -1,3 +1,5 @@
+mkdir -p results
+
 # Extract Owner/Repo from CSV and get distinct lines without sorting
 tail -n +2 "$1" | awk -F, '{print $2}' | uniq > repos.txt
 
