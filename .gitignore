@@ -165,3 +165,7 @@ cython_debug/
 *.csv
 results
 *.txt
+
+data.json
+
+*.ndjson
