@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from github import Github
 
 # Limit the number of concurrent scans
-sem = Semaphore(3)
+sem = Semaphore(100)
 
 
 async def scan(obj: str, result_file: str):
