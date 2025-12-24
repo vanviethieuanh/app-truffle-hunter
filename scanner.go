@@ -5,8 +5,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/google/go-github/v80/github"
 	"go.uber.org/zap"
@@ -23,11 +26,19 @@ type Scanner struct {
 func NewScanner(
 	logger *zap.Logger,
 	MaxConcurrentWorkers int,
+	ctx context.Context,
 ) *Scanner {
-	return &Scanner{
+	s := &Scanner{
 		Logger:    logger,
 		Semaphore: make(chan struct{}, MaxConcurrentWorkers),
 	}
+
+	loadSyncMap(&s.scannedRepos, "scanned_repos.json")
+	loadSyncMap(&s.scannedOwners, "scanned_owners.json")
+
+	s.startPeriodicDump(ctx, 1*time.Minute)
+
+	return s
 }
 
 func (s *Scanner) Scan(
@@ -185,4 +196,77 @@ func (s *Scanner) runTrufflehog(
 	}
 
 	return verifiedCount, unverifiedCount, nil
+}
+
+func dumpSyncMap(m *sync.Map, filename string) error {
+	keys := []string{}
+
+	m.Range(func(key, value any) bool {
+		if k, ok := key.(string); ok {
+			keys = append(keys, k)
+		}
+		return true
+	})
+
+	data, err := json.MarshalIndent(keys, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	filePath := filepath.Join(".cache", filename)
+	return os.WriteFile(filePath, data, 0o644)
+}
+
+func loadSyncMap(m *sync.Map, filename string) error {
+	filePath := filepath.Join(".cache", filename)
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	var keys []string
+	if err := json.Unmarshal(data, &keys); err != nil {
+		return err
+	}
+
+	for _, k := range keys {
+		m.Store(k, struct{}{})
+	}
+
+	return nil
+}
+
+func (s *Scanner) startPeriodicDump(ctx context.Context, interval time.Duration) {
+	dumps := map[*sync.Map]string{
+		&s.scannedRepos:  "scanned_repos.json",
+		&s.scannedOwners: "scanned_owners.json",
+	}
+
+	ticker := time.NewTicker(interval)
+
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				for m, file := range dumps {
+					if err := dumpSyncMap(m, file); err != nil {
+						s.Logger.Warn("failed to dump sync.Map", zap.String("file", file), zap.Error(err))
+					}
+				}
+			case <-ctx.Done():
+				s.Logger.Info("stopping periodic sync.Map dump")
+				return
+			}
+		}
+	}()
+}
+
+func (s *Scanner) DumpMaps() {
+	if err := dumpSyncMap(&s.scannedRepos, "scanned_repos.json"); err != nil {
+		s.Logger.Warn("failed to dump scannedRepos", zap.Error(err))
+	}
+	if err := dumpSyncMap(&s.scannedOwners, "scanned_owners.json"); err != nil {
+		s.Logger.Warn("failed to dump scannedOwners", zap.Error(err))
+	}
 }

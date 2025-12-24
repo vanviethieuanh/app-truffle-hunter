@@ -47,7 +47,7 @@ func TestScanner_Scan(t *testing.T) {
 			repoCh := make(chan *github.Repository, 10)
 			secCh := make(chan *main.ScanResult, 100)
 
-			s := main.NewScanner(tt.logger, tt.MaxConcurrentWorkers)
+			s := main.NewScanner(tt.logger, tt.MaxConcurrentWorkers, ctx)
 
 			// Start scanner
 			go func() {

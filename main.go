@@ -31,7 +31,8 @@ func main() {
 	httpClient := &http.Client{}
 	ghClient := github.NewClient(httpClient)
 
-	scanner := NewScanner(logger, 5)
+	scanner := NewScanner(logger, 5, ctx)
+	defer scanner.DumpMaps()
 
 	go func() {
 		defer close(repoCh)
