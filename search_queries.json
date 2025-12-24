@@ -1,5 +1,4 @@
 [
-
     {
         "query": "filename:.env TWILIO_AUTH_TOKEN",
         "secret": "Searches for 'TWILIO_AUTH_TOKEN' in `.env` files, which may reveal Twilio authentication tokens."
@@ -51,5 +50,9 @@
     {
         "query": "filename:.env oauth OR token",
         "secret": "Searches for OAuth tokens in `.env` files, which might be used for authentication in OAuth-based systems."
+    },
+    {
+        "query": "OPENAI_API_KEY=sk",
+        "secret": "Search for OpenAI key"
     }
 ]
