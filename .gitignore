@@ -169,3 +169,5 @@ results
 data.json
 
 *.ndjson
+
+*.jsonl
