@@ -31,7 +31,7 @@ func main() {
 	httpClient := &http.Client{}
 	ghClient := github.NewClient(httpClient)
 
-	scanner := NewScanner(logger, 3)
+	scanner := NewScanner(logger, 5)
 
 	go func() {
 		defer close(repoCh)
@@ -43,5 +43,5 @@ func main() {
 		scanner.Scan(ctx, repoCh, secCh)
 	}()
 
-	Saver(ctx, secCh, logger, "result.jsonl")
+	SaveToJsonl(ctx, secCh, logger, "result.jsonl")
 }

@@ -8,7 +8,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func Saver(
+func SaveToJsonl(
 	ctx context.Context,
 	in <-chan *ScanResult,
 	logger *zap.Logger,

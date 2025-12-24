@@ -125,6 +125,10 @@ func (q *Query) getRepositories(
 func initQueries() []Query {
 	return []Query{
 		Query{
+			SearchTerm: "OPENAI_API_KEY=sk",
+			Desc:       "Search for OpenAI key",
+		},
+		Query{
 			SearchTerm: "filename:.env TWILIO_AUTH_TOKEN",
 			Desc:       "Searches for 'TWILIO_AUTH_TOKEN' in `.env` files, which may reveal Twilio authentication tokens.",
 		},
@@ -175,10 +179,6 @@ func initQueries() []Query {
 		Query{
 			SearchTerm: "filename:.env oauth OR token",
 			Desc:       "Searches for OAuth tokens in `.env` files, which might be used for authentication in OAuth-based systems.",
-		},
-		Query{
-			SearchTerm: "OPENAI_API_KEY=sk",
-			Desc:       "Search for OpenAI key",
 		},
 	}
 }

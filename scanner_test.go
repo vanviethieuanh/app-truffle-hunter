@@ -2,11 +2,12 @@ package main_test
 
 import (
 	"context"
+	"testing"
+	"time"
+
 	"github.com/google/go-github/v80/github"
 	main "github.com/vanviethieuanh/app-truffle-hunter"
 	"go.uber.org/zap"
-	"testing"
-	"time"
 )
 
 func TestScanner_Scan(t *testing.T) {
@@ -18,6 +19,7 @@ func TestScanner_Scan(t *testing.T) {
 	tests := []struct {
 		name                 string
 		logger               *zap.Logger
+		ghClient             *github.Client
 		MaxConcurrentWorkers int
 		testRepos            []github.Repository
 	}{
@@ -27,8 +29,11 @@ func TestScanner_Scan(t *testing.T) {
 			MaxConcurrentWorkers: 2,
 			testRepos: []github.Repository{
 				{
-					HTMLURL:  github.Ptr("https://github.com/trufflesecurity/test_keys"),
 					FullName: github.Ptr("trufflesecurity/test_keys"),
+					HTMLURL:  github.Ptr("https://github.com/trufflesecurity/test_keys"),
+					Owner: &github.User{
+						Login: github.Ptr("trufflesecurity"),
+					},
 				},
 			},
 		},

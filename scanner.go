@@ -16,7 +16,8 @@ type Scanner struct {
 	Logger    *zap.Logger
 	Semaphore chan struct{}
 
-	scannedRepo sync.Map
+	scannedRepos  sync.Map
+	scannedOwners sync.Map
 }
 
 func NewScanner(
@@ -42,12 +43,6 @@ func (s *Scanner) Scan(
 			s.Logger.Info("scanner context cancelled", zap.Error(ctx.Err()))
 			return
 		case s.Semaphore <- struct{}{}:
-			_, loaded := s.scannedRepo.LoadOrStore(repo.GetFullName(), struct{}{})
-			if loaded {
-				<-s.Semaphore
-				continue
-			}
-
 			wg.Add(1)
 
 			go func(r *github.Repository) {
@@ -56,7 +51,10 @@ func (s *Scanner) Scan(
 					wg.Done()
 				}()
 
-				verified, unverified, err := s.scanRepo(ctx, r, out)
+				skipped, verified, unverified, err := s.scanRepo(ctx, r, out)
+				if skipped {
+					return
+				}
 				if err != nil {
 					s.Logger.Warn(
 						"scan failed",
@@ -66,11 +64,20 @@ func (s *Scanner) Scan(
 					return
 				}
 
-				s.Logger.Info("finished scanning repo",
-					zap.String("repo", r.GetFullName()),
-					zap.Int("unverified", unverified),
-					zap.Int("verified", verified),
+				if verified <= 0 {
+					s.Logger.Info("finished scanning repo",
+						zap.String("repo", r.GetFullName()),
+						zap.Int("unverified", unverified),
+						zap.Int("verified", verified),
+					)
+					return
+				}
+
+				s.Logger.Info(
+					"Found verified secret(s) from a repo, starting scan an org",
+					zap.String("owner", *r.Owner.Login),
 				)
+				s.scanOrg(ctx, *r.Owner.Login, out)
 			}(repo)
 		}
 	}
@@ -82,34 +89,66 @@ func (s *Scanner) scanRepo(
 	ctx context.Context,
 	r *github.Repository,
 	out chan<- *ScanResult,
-) (int, int, error) {
-	cmd := exec.CommandContext(ctx,
-		"trufflehog",
-		"github",
-		"--repo", r.GetHTMLURL(),
+) (skipped bool, verified int, unverified int, err error) {
+	_, loaded := s.scannedRepos.LoadOrStore(r.GetFullName(), struct{}{})
+	if loaded {
+		return loaded, 0, 0, nil
+	}
+
+	verified, unverified, err = s.runTrufflehog(ctx, out, "--repo", r.GetHTMLURL())
+	return loaded, verified, unverified, err
+}
+
+func (s *Scanner) scanOrg(
+	ctx context.Context,
+	orgLogin string,
+	out chan<- *ScanResult,
+) (skipped bool, verified int, unverified int, err error) {
+	_, loaded := s.scannedOwners.LoadOrStore(orgLogin, struct{}{})
+	if loaded {
+		return loaded, 0, 0, nil
+	}
+
+	verified, unverified, err = s.runTrufflehog(ctx, out, "--org", orgLogin)
+	return loaded, verified, unverified, err
+}
+
+func (s *Scanner) runTrufflehog(
+	ctx context.Context,
+	out chan<- *ScanResult,
+	args ...string,
+) (verifiedCount, unverifiedCount int, err error) {
+	target := "unknown"
+	if len(args) >= 2 {
+		target = args[1]
+	}
+	logger := s.Logger.With(zap.String("target", target))
+
+	cmdArgs := append([]string{"github"}, args...)
+	cmdArgs = append(cmdArgs,
 		"--results", "verified,unverified,unknown",
-		"--clone-path", "/mnt/ssd/tmp/trufflehog",
 		"--json",
+		"--clone-path", "/mnt/ssd/tmp/trufflehog",
 		"--log-level=-1",
 		"--no-color",
 		"--no-update",
 	)
+	cmd := exec.CommandContext(ctx, "trufflehog", cmdArgs...)
+
+	logger.Info("Starting scan process.", zap.String("cmd", cmd.String()))
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		s.Logger.Warn("trufflehog failed",
-			zap.String("repo", r.GetFullName()),
+		logger.Warn("trufflehog failed",
 			zap.Error(err),
 			zap.String("stderr", stderr.String()),
 		)
 		return 0, 0, err
 	}
 
-	verifiedCount := 0
-	unverifedCount := 0
 	scanner := bufio.NewScanner(&stdout)
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -119,37 +158,31 @@ func (s *Scanner) scanRepo(
 
 		var res ScanResult
 		if err := json.Unmarshal(line, &res); err != nil {
-			s.Logger.Warn("failed to parse trufflehog line",
-				zap.String("repo", r.GetFullName()),
+			logger.Warn("failed to parse trufflehog line",
 				zap.Error(err),
 				zap.ByteString("line", line),
 			)
 			continue
 		}
 
-		// send to channel
 		select {
 		case out <- &res:
 			if res.Verified {
 				verifiedCount++
 			} else {
-				unverifedCount++
+				unverifiedCount++
 			}
 		case <-ctx.Done():
-			s.Logger.Info("context cancelled while sending result",
-				zap.String("repo", r.GetFullName()),
-			)
-			return verifiedCount, unverifedCount, ctx.Err()
+			logger.Info("context cancelled while sending result")
+			return verifiedCount, unverifiedCount, ctx.Err()
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		s.Logger.Warn("error scanning trufflehog stdout",
-			zap.String("repo", r.GetFullName()),
+		logger.Warn("error scanning trufflehog stdout",
 			zap.Error(err),
 		)
 	}
 
-	// return number of secrets found
-	return verifiedCount, unverifedCount, nil
+	return verifiedCount, unverifiedCount, nil
 }
