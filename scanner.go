@@ -15,6 +15,8 @@ import (
 type Scanner struct {
 	Logger    *zap.Logger
 	Semaphore chan struct{}
+
+	scannedRepo sync.Map
 }
 
 func NewScanner(
@@ -40,16 +42,30 @@ func (s *Scanner) Scan(
 			s.Logger.Info("scanner context cancelled", zap.Error(ctx.Err()))
 			return
 		case s.Semaphore <- struct{}{}:
+			_, loaded := s.scannedRepo.LoadOrStore(repo.GetFullName(), struct{}{})
+			if loaded {
+				<-s.Semaphore
+				continue
+			}
+
 			wg.Add(1)
+
 			go func(r *github.Repository) {
 				defer func() {
 					<-s.Semaphore
 					wg.Done()
 				}()
+
 				verified, unverified, err := s.scanRepo(ctx, r, out)
 				if err != nil {
-					s.Logger.Warn("scan failed", zap.String("repo", r.GetFullName()), zap.Error(err))
+					s.Logger.Warn(
+						"scan failed",
+						zap.String("repo", r.GetFullName()),
+						zap.Error(err),
+					)
+					return
 				}
+
 				s.Logger.Info("finished scanning repo",
 					zap.String("repo", r.GetFullName()),
 					zap.Int("unverified", unverified),
