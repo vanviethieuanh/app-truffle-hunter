@@ -1,0 +1,58 @@
+[
+    {
+        "search": "filename:.env TWILIO_AUTH_TOKEN",
+        "description": "Searches for 'TWILIO_AUTH_TOKEN' in `.env` files, which may reveal Twilio authentication tokens."
+    },
+    {
+        "search": "filename:.env TWILIO_ACCOUNT_SID",
+        "description": "Searches for 'TWILIO_ACCOUNT_SID' in `.env` files, which may expose Twilio account SID."
+    },
+    {
+        "search": "filename:.env TWILIO_API_KEY",
+        "description": "Searches for 'TWILIO_API_KEY' in `.env` files, which may reveal Twilio API keys."
+    },
+    {
+        "search": "filename:.env TWILIO_PHONE_NUMBER",
+        "description": "Searches for 'TWILIO_PHONE_NUMBER' in `.env` files, which may expose Twilio phone numbers."
+    },
+    {
+        "search": "filename:.env api_key",
+        "description": "Searches for 'api_key' in `.env` files, which may reveal API keys for external services."
+    },
+    {
+        "search": "filename:.env password OR secret",
+        "description": "Searches for 'password' or 'secret' in `.env` files, commonly used to store sensitive credentials."
+    },
+    {
+        "search": "AWS_ACCESS_KEY_ID OR AWS_SECRET_ACCESS_KEY filename:.env",
+        "description": "Searches for AWS access and secret keys within `.env` files."
+    },
+    {
+        "search": "ghp_ filename:.env",
+        "description": "Searches for GitHub Personal Access Tokens (PATs), which start with `ghp_`."
+    },
+    {
+        "search": "filename:.env jwt OR bearer",
+        "description": "Searches for JWT (JSON Web Token) or bearer tokens in `.env` files."
+    },
+    {
+        "search": "filename:.env OR filename:config.yml OR filename:.bashrc OR filename:settings.py token",
+        "description": "Searches for the word 'token' in several common configuration files that might store secrets."
+    },
+    {
+        "search": "filename:*.yml path:.github/workflows secret",
+        "description": "Searches for secrets in GitHub Actions workflow files, which are often stored in `.yml` files under `.github/workflows`."
+    },
+    {
+        "search": "filename:.env API_KEY OR SECRET_KEY OR DB_PASSWORD",
+        "description": "Searches for common environment variable names in `.env` files, which may expose API keys, secret keys, or database passwords."
+    },
+    {
+        "search": "filename:.env oauth OR token",
+        "description": "Searches for OAuth tokens in `.env` files, which might be used for authentication in OAuth-based systems."
+    },
+    {
+        "search": "OPENAI_API_KEY=sk",
+        "description": "Search for OpenAI key"
+    }
+]

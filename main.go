@@ -16,6 +16,7 @@ import (
 
 const ScannedOwnerCachePath = "scanned_owners.json"
 const ScannedRepoCachePath = "scanned_repos.json"
+const QueriesPath = "queries.json"
 
 func main() {
 	ctx, cancel := signal.NotifyContext(
@@ -48,9 +49,14 @@ func main() {
 		dumpSyncMap(&scannedRepos, ScannedRepoCachePath)
 	}()
 
+	loadedQueries, err := LoadQueries(QueriesPath)
+	if err != nil {
+		logger.Error("Failed to load queries", zap.Error(err))
+	}
+
 	initScanReqCh := Mapper(
 		ctx,
-		QueryRepoGenerator(ctx, ghClient, logger, 100),
+		QueryRepoGenerator(ctx, ghClient, loadedQueries, logger, 100),
 		10,
 		func(i *github.Repository) *ScanRequest {
 			return &ScanRequest{
