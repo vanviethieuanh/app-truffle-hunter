@@ -42,3 +42,5 @@ data.json
 *.jsonl
 
 .cache
+
+queries.json

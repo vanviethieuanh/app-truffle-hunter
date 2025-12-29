@@ -1,5 +1,21 @@
 # truffle-hunter
 
-## Usage
+Add a file name `queries.json`, with content like this:
 
-Run `main.py` to search on github following the `search_queries.json` -> run `hog_race.sh` to parallel start trufflehog to deep scan.
+```json
+[
+    {
+        "search": "filename:.env TWILIO_AUTH_TOKEN",
+        "description": "Searches for 'TWILIO_AUTH_TOKEN' in `.env` files, which may reveal Twilio authentication tokens."
+    },
+    ...
+]
+```
+
+Run:
+
+```sh
+task
+```
+
+to run the tool, result will be saved to `result.jsonl`
