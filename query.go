@@ -15,7 +15,7 @@ type Query struct {
 	Desc       string
 }
 
-func QueryRepositories(
+func QueryRepoGenerator(
 	ctx context.Context,
 	ghClient *github.Client,
 	logger *zap.Logger,

@@ -1,6 +1,6 @@
 package main
 
-type ScanResult struct {
+type Secret struct {
 	SourceMetadata        SourceMetadata `json:"SourceMetadata"`
 	SourceID              int            `json:"SourceID"`
 	SourceType            int            `json:"SourceType"`

@@ -15,187 +15,155 @@ import (
 	"go.uber.org/zap"
 )
 
-type Scanner struct {
-	Logger    *zap.Logger
-	Semaphore chan struct{}
-
-	scannedRepos  sync.Map
-	scannedOwners sync.Map
+type ScanRequest struct {
+	org  *string
+	repo *github.Repository
 }
 
-func NewScanner(
+type ScanResult struct {
+	sec   *Secret
+	owner *string
+}
+
+func scan(
+	ctx context.Context,
+	in <-chan *ScanRequest,
+	bufSize int,
+	workers int,
 	logger *zap.Logger,
-	MaxConcurrentWorkers int,
-	ctx context.Context,
-) *Scanner {
-	s := &Scanner{
-		Logger:    logger,
-		Semaphore: make(chan struct{}, MaxConcurrentWorkers),
-	}
+) (<-chan *Secret, <-chan *string) {
+	out := make(chan *Secret, bufSize)
+	org := make(chan *string, bufSize)
 
-	loadSyncMap(&s.scannedRepos, "scanned_repos.json")
-	loadSyncMap(&s.scannedOwners, "scanned_owners.json")
+	logger = logger.With(zap.String("stage", "Scan Repo"))
 
-	s.startPeriodicDump(ctx, 1*time.Minute)
+	go func() {
+		var wg sync.WaitGroup
 
-	return s
-}
+		for range workers {
+			wg.Go(func() {
+				for {
+					select {
+					case <-ctx.Done():
+						logger.Info(
+							"scanner context cancelled",
+							zap.Error(ctx.Err()),
+						)
+						return
+					case scanReq, ok := <-in:
+						if !ok {
+							return
+						}
 
-func (s *Scanner) Scan(
-	ctx context.Context,
-	in <-chan *github.Repository,
-	out chan<- *ScanResult,
-) {
-	var wg sync.WaitGroup
+						var secCh <-chan *Secret
+						if scanReq.org != nil {
+							secCh = runTrufflehog(ctx, bufSize, logger, "--org", *scanReq.org)
+						}
+						if scanReq.repo != nil {
+							secCh = runTrufflehog(ctx, bufSize, logger, "--repo", scanReq.repo.GetHTMLURL())
+						}
 
-	for repo := range in {
-		select {
-		case <-ctx.Done():
-			s.Logger.Info("scanner context cancelled", zap.Error(ctx.Err()))
-			return
-		case s.Semaphore <- struct{}{}:
-			wg.Add(1)
+						verified := 0
+						for sec := range secCh {
+							if sec.Verified {
+								verified++
+							}
 
-			go func(r *github.Repository) {
-				defer func() {
-					<-s.Semaphore
-					wg.Done()
-				}()
+							out <- sec
+						}
 
-				skipped, verified, unverified, err := s.scanRepo(ctx, r, out)
-				if skipped {
-					return
+						if verified > 0 && scanReq.repo != nil {
+							org <- scanReq.repo.GetOwner().Login
+						}
+					}
 				}
-				if err != nil {
-					s.Logger.Warn(
-						"scan failed",
-						zap.String("repo", r.GetFullName()),
-						zap.Error(err),
-					)
-					return
-				}
-
-				if verified <= 0 {
-					s.Logger.Info("finished scanning repo",
-						zap.String("repo", r.GetFullName()),
-						zap.Int("unverified", unverified),
-						zap.Int("verified", verified),
-					)
-					return
-				}
-
-				s.Logger.Info(
-					"Found verified secret(s) from a repo, starting scan an org",
-					zap.String("owner", *r.Owner.Login),
-				)
-				s.scanOrg(ctx, *r.Owner.Login, out)
-			}(repo)
+			})
 		}
-	}
 
-	wg.Wait()
+		go func() {
+			wg.Wait()
+			close(org)
+			close(out)
+		}()
+	}()
+
+	return out, org
 }
 
-func (s *Scanner) scanRepo(
+func runTrufflehog(
 	ctx context.Context,
-	r *github.Repository,
-	out chan<- *ScanResult,
-) (skipped bool, verified int, unverified int, err error) {
-	_, loaded := s.scannedRepos.LoadOrStore(r.GetFullName(), struct{}{})
-	if loaded {
-		return loaded, 0, 0, nil
-	}
-
-	verified, unverified, err = s.runTrufflehog(ctx, out, "--repo", r.GetHTMLURL())
-	return loaded, verified, unverified, err
-}
-
-func (s *Scanner) scanOrg(
-	ctx context.Context,
-	orgLogin string,
-	out chan<- *ScanResult,
-) (skipped bool, verified int, unverified int, err error) {
-	_, loaded := s.scannedOwners.LoadOrStore(orgLogin, struct{}{})
-	if loaded {
-		return loaded, 0, 0, nil
-	}
-
-	verified, unverified, err = s.runTrufflehog(ctx, out, "--org", orgLogin)
-	return loaded, verified, unverified, err
-}
-
-func (s *Scanner) runTrufflehog(
-	ctx context.Context,
-	out chan<- *ScanResult,
+	bufSize int,
+	logger *zap.Logger,
 	args ...string,
-) (verifiedCount, unverifiedCount int, err error) {
-	target := "unknown"
-	if len(args) >= 2 {
-		target = args[1]
-	}
-	logger := s.Logger.With(zap.String("target", target))
+) <-chan *Secret {
+	out := make(chan *Secret, bufSize)
 
-	cmdArgs := append([]string{"github"}, args...)
-	cmdArgs = append(cmdArgs,
-		"--results", "verified,unverified,unknown",
-		"--json",
-		"--clone-path", "/mnt/ssd/tmp/trufflehog",
-		"--log-level=-1",
-		"--no-color",
-		"--no-update",
-	)
-	cmd := exec.CommandContext(ctx, "trufflehog", cmdArgs...)
+	go func() {
+		defer close(out)
 
-	logger.Info("Starting scan process.", zap.String("cmd", cmd.String()))
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		logger.Warn("trufflehog failed",
-			zap.Error(err),
-			zap.String("stderr", stderr.String()),
-		)
-		return 0, 0, err
-	}
-
-	scanner := bufio.NewScanner(&stdout)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
+		target := "unknown"
+		if len(args) >= 2 {
+			target = args[1]
 		}
+		logger = logger.With(zap.String("target", target))
 
-		var res ScanResult
-		if err := json.Unmarshal(line, &res); err != nil {
-			logger.Warn("failed to parse trufflehog line",
+		cmdArgs := append([]string{"github"}, args...)
+		cmdArgs = append(cmdArgs,
+			"--results", "verified,unverified,unknown",
+			"--json",
+			"--clone-path", "/mnt/ssd/tmp/trufflehog",
+			"--log-level=-1",
+			"--no-color",
+			"--no-update",
+		)
+		cmd := exec.CommandContext(ctx, "trufflehog", cmdArgs...)
+
+		logger.Info("Starting scan process.", zap.String("cmd", cmd.String()))
+
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		if err := cmd.Run(); err != nil {
+			logger.Warn("trufflehog failed",
 				zap.Error(err),
-				zap.ByteString("line", line),
+				zap.String("stderr", stderr.String()),
 			)
-			continue
+			return
 		}
 
-		select {
-		case out <- &res:
-			if res.Verified {
-				verifiedCount++
-			} else {
-				unverifiedCount++
+		scanner := bufio.NewScanner(&stdout)
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(bytes.TrimSpace(line)) == 0 {
+				continue
 			}
-		case <-ctx.Done():
-			logger.Info("context cancelled while sending result")
-			return verifiedCount, unverifiedCount, ctx.Err()
+
+			var res Secret
+			if err := json.Unmarshal(line, &res); err != nil {
+				logger.Warn("failed to parse trufflehog line",
+					zap.Error(err),
+					zap.ByteString("line", line),
+				)
+				continue
+			}
+
+			select {
+			case out <- &res:
+			case <-ctx.Done():
+				logger.Info("context cancelled while sending result")
+				return
+			}
 		}
-	}
 
-	if err := scanner.Err(); err != nil {
-		logger.Warn("error scanning trufflehog stdout",
-			zap.Error(err),
-		)
-	}
+		if err := scanner.Err(); err != nil {
+			logger.Warn("error scanning trufflehog stdout",
+				zap.Error(err),
+			)
+		}
+	}()
 
-	return verifiedCount, unverifiedCount, nil
+	return out
 }
 
 func dumpSyncMap(m *sync.Map, filename string) error {
@@ -236,12 +204,13 @@ func loadSyncMap(m *sync.Map, filename string) error {
 	return nil
 }
 
-func (s *Scanner) startPeriodicDump(ctx context.Context, interval time.Duration) {
-	dumps := map[*sync.Map]string{
-		&s.scannedRepos:  "scanned_repos.json",
-		&s.scannedOwners: "scanned_owners.json",
-	}
-
+func startPeriodicDump(
+	ctx context.Context,
+	interval time.Duration,
+	data *sync.Map,
+	filePath string,
+	logger *zap.Logger,
+) {
 	ticker := time.NewTicker(interval)
 
 	go func() {
@@ -249,24 +218,17 @@ func (s *Scanner) startPeriodicDump(ctx context.Context, interval time.Duration)
 		for {
 			select {
 			case <-ticker.C:
-				for m, file := range dumps {
-					if err := dumpSyncMap(m, file); err != nil {
-						s.Logger.Warn("failed to dump sync.Map", zap.String("file", file), zap.Error(err))
-					}
+				if err := dumpSyncMap(data, filePath); err != nil {
+					logger.Warn(
+						"failed to dump sync.Map",
+						zap.String("file", filePath),
+						zap.Error(err),
+					)
 				}
 			case <-ctx.Done():
-				s.Logger.Info("stopping periodic sync.Map dump")
+				logger.Info("stopping periodic sync.Map dump")
 				return
 			}
 		}
 	}()
-}
-
-func (s *Scanner) DumpMaps() {
-	if err := dumpSyncMap(&s.scannedRepos, "scanned_repos.json"); err != nil {
-		s.Logger.Warn("failed to dump scannedRepos", zap.Error(err))
-	}
-	if err := dumpSyncMap(&s.scannedOwners, "scanned_owners.json"); err != nil {
-		s.Logger.Warn("failed to dump scannedOwners", zap.Error(err))
-	}
 }

@@ -10,7 +10,7 @@ import (
 
 func SaveToJsonl(
 	ctx context.Context,
-	in <-chan *ScanResult,
+	in <-chan *Secret,
 	logger *zap.Logger,
 	filename string,
 ) {
