@@ -18,10 +18,12 @@ type Query struct {
 func QueryRepositories(
 	ctx context.Context,
 	ghClient *github.Client,
-	out chan<- *github.Repository,
 	logger *zap.Logger,
-) {
+	bufferSize int,
+) <-chan *github.Repository {
 	var queriesWg sync.WaitGroup
+
+	out := make(chan *github.Repository, bufferSize)
 
 	for _, q := range initQueries() {
 		queriesWg.Add(1)
@@ -31,7 +33,12 @@ func QueryRepositories(
 		}(q)
 	}
 
-	queriesWg.Wait()
+	go func() {
+		queriesWg.Wait()
+		close(out)
+	}()
+
+	return out
 }
 
 func (q *Query) getRepositories(

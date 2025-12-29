@@ -25,7 +25,6 @@ func main() {
 		panic(err)
 	}
 
-	repoCh := make(chan *github.Repository, 100)
 	secCh := make(chan *ScanResult, 100)
 
 	httpClient := &http.Client{}
@@ -34,10 +33,7 @@ func main() {
 	scanner := NewScanner(logger, 5, ctx)
 	defer scanner.DumpMaps()
 
-	go func() {
-		defer close(repoCh)
-		QueryRepositories(ctx, ghClient, repoCh, logger)
-	}()
+	repoCh := QueryRepositories(ctx, ghClient, logger, 100)
 
 	go func() {
 		defer close(secCh)
