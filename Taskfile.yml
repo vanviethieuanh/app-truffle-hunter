@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: "3"
+
+vars:
+  BINARY_NAME: "build/hunter"
+
+tasks:
+  clear-cache:
+    desc: "Clear the .cache directory"
+    cmds:
+      - echo "Clearing .cache directory..."
+      - mkdir -p .cache
+      - rm -rf .cache/*
+
+  build:
+    desc: "Build the Go project"
+    cmds:
+      - echo "Building {{.BINARY_NAME}}..."
+      - go build -o {{.BINARY_NAME}} ./...
+    silent: false
+    sources:
+      - "*.go"
+
+  run:
+    desc: "Run the Go binary"
+    cmds:
+      - echo "Running {{.BINARY_NAME}}..."
+      - ./{{.BINARY_NAME}}
+    silent: false
+
+  default:
+    desc: "Clear cache, build, run, and print greeting"
+    cmds:
+      - mkdir -p .cache
+      - task: build
+      - task: run
+    silent: false
