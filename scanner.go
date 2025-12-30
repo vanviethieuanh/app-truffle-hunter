@@ -55,25 +55,34 @@ func scan(
 							return
 						}
 
-						var secCh <-chan *Secret
 						if scanReq.org != nil {
-							secCh = runTrufflehog(ctx, bufSize, logger, "--org", *scanReq.org)
-						}
-						if scanReq.repo != nil {
-							secCh = runTrufflehog(ctx, bufSize, logger, "--repo", scanReq.repo.GetHTMLURL())
+							secCh := runTrufflehog(ctx, bufSize, logger, "--org", *scanReq.org)
+
+							verified := 0
+							for sec := range secCh {
+								if sec.Verified {
+									verified++
+								}
+
+								out <- sec
+							}
 						}
 
-						verified := 0
-						for sec := range secCh {
-							if sec.Verified {
-								verified++
+						if scanReq.repo != nil {
+							secCh := runTrufflehog(ctx, bufSize, logger, "--repo", scanReq.repo.GetHTMLURL())
+
+							verified := 0
+							for sec := range secCh {
+								if sec.Verified {
+									verified++
+								}
+
+								out <- sec
 							}
 
-							out <- sec
-						}
-
-						if verified > 0 && scanReq.repo != nil {
-							org <- scanReq.repo.GetOwner().Login
+							if verified > 0 {
+								org <- scanReq.repo.GetOwner().Login
+							}
 						}
 					}
 				}
